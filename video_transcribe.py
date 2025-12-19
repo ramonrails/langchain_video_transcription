@@ -45,13 +45,12 @@ def transcribe_audio(model, audio_file, transcript_file):
         f.write(result["text"])
     return transcript_file
 
-def process_video(video_path, whisper_model, generate_pdf=False, llm_model="deepseek-r1"):
+def process_video(video_path, whisper_model, generate_pdf=False, llm_model="gemma3"):
     base = Path(video_path).stem
     dir_path = Path(video_path).parent
 
     audio_file = dir_path / f"{base}.mp3"
     transcript_file = dir_path / f"{base}.txt"
-    summary_file = dir_path / f"{base}.md"
     study_file = dir_path / f"{base}_study.md"
     pdf_file = dir_path / f"{base}.pdf"
 
@@ -71,44 +70,29 @@ def process_video(video_path, whisper_model, generate_pdf=False, llm_model="deep
     if not transcript_file.exists():
         spinner("    video > audio > ...", transcribe_audio,
                 whisper_model, audio_file, transcript_file)
-    steps.append("text")
+    steps.append("transcript")
 
-    # Step 3: Summarise
-    if not summary_file.exists():
-        def summarise():
-            prompt = PromptTemplate.from_template(
-                "Summarise the following transcript into topics, headings, subheadings, and concepts:\n\n{transcript}"
-            )
-            llm = OllamaLLM(model=llm_model)
-            chain = RunnableSequence(first=prompt, last=llm)
-            with open(transcript_file, "r", encoding="utf-8") as f:
-                transcript = f.read()
-            summary = chain.invoke({"transcript": transcript})
-            with open(summary_file, "w", encoding="utf-8") as f:
-                f.write(summary)
-        spinner("    video > audio > text > ...", summarise)
-    steps.append("markdown")
-
-    # Step 4: Study material
+    # Step 3: Study material (directly from transcript)
     if not study_file.exists():
         def study():
             study_prompt = PromptTemplate.from_template(
-                "Using the following summary, generate structured study material including:\n"
+                "Using the following transcript, generate structured study material including:\n"
                 "- Key concepts and definitions\n"
                 "- Bullet-point notes\n"
-                "- Glossary of important terms with explanations\n"
-                "- 25 practice questions (mix of MCQ and short answer)\n\n{summary}"
+                "- Glossary of important terms with explanations (format as a bullet list, NOT a table)\n"
+                "- 25 practice questions (mix of MCQ and short answer)\n\n{transcript}"
             )
             llm = OllamaLLM(model=llm_model)
             study_chain = RunnableSequence(first=study_prompt, last=llm)
-            with open(summary_file, "r", encoding="utf-8") as f:
-                summary_text = f.read()
-            study_material = study_chain.invoke({"summary": summary_text})
+            with open(transcript_file, "r", encoding="utf-8") as f:
+                transcript_text = f.read()
+            study_material = study_chain.invoke({"transcript": transcript_text})
             with open(study_file, "w", encoding="utf-8") as f:
                 f.write(study_material)
-        spinner("    video > audio > text > markdown > ...", study)
+        spinner("    video > audio > text > ...", study)
+    steps.append("study guide")
 
-    # Step 5: PDF
+    # Step 4: PDF
     if generate_pdf:
         if not pdf_file.exists():
             # Path to the LaTeX header file
